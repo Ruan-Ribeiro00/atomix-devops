@@ -1,0 +1,64 @@
+# =============================================================================
+#  ATOMIX - Docker Compose (API Java + Oracle Database 23ai Free)
+#  Subir em background:   docker compose up -d --build
+#  Acompanhar logs:       docker compose logs -f
+# =============================================================================
+name: atomix
+
+services:
+
+  # ---------------------------------------------------------------- Banco ----
+  oracle-db:
+    image: gvenzl/oracle-free:23-slim
+    container_name: atomix-oracle
+    restart: unless-stopped
+    environment:
+      ORACLE_PASSWORD: ${ORACLE_PASSWORD}          # senha de SYS/SYSTEM
+      APP_USER: ${DB_USER}                          # schema da aplicação (criado no FREEPDB1)
+      APP_USER_PASSWORD: ${DB_PASSWORD}
+      NLS_LANG: BRAZILIAN PORTUGUESE_BRAZIL.AL32UTF8
+      TZ: America/Sao_Paulo
+    volumes:
+      - oracle-data:/opt/oracle/oradata                         # persistência dos dados
+      - ./database/01-criar-objetos.sh:/container-entrypoint-initdb.d/01-criar-objetos.sh:ro  # roda na 1ª inicialização
+      - ./database/sql:/opt/atomix/sql:ro                        # DDL + PL/SQL + INSERTs
+    networks:
+      - atomix-net
+    # Porta 1521 NÃO publicada: o banco só é acessado pela rede Docker interna.
+    healthcheck:
+      test: ["CMD", "healthcheck.sh"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 90s
+
+  # ------------------------------------------------------------------ API ----
+  atomix-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: atomix-api:1.0
+    container_name: atomix-api
+    restart: unless-stopped
+    depends_on:
+      oracle-db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:oracle:thin:@oracle-db:1521/FREEPDB1   # nome do serviço na rede atomix-net
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      SERVER_PORT: 8080
+      TZ: America/Sao_Paulo
+    ports:
+      - "${API_PORT:-8080}:8080"
+    networks:
+      - atomix-net
+
+networks:
+  atomix-net:
+    name: atomix-net
+    driver: bridge
+
+volumes:
+  oracle-data:
+    name: atomix-oracle-data
